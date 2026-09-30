@@ -29,7 +29,8 @@ def window(qtbot, tmp_path, monkeypatch):
     from klipwerk.app import Klipwerk
     w = Klipwerk()
     qtbot.addWidget(w)
-    return w
+    yield w
+    w.close()
 
 
 @pytest.fixture

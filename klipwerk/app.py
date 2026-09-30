@@ -604,7 +604,7 @@ class Klipwerk(QMainWindow):
         fx.setOpacity(0.0)
         lbl.setGraphicsEffect(fx)
 
-        anim = QPropertyAnimation(fx, b"opacity")
+        anim = QPropertyAnimation(fx, b"opacity", fx)
         anim.setDuration(150)
         anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
@@ -1832,13 +1832,7 @@ class Klipwerk(QMainWindow):
             getattr(self, "_btn_max", None),
             getattr(self, "_btn_close", None),
         )
-        if is_global:
-            widget = QApplication.widgetAt(pos)
-            if widget is not None:
-                return any(b is not None and (widget is b or b.isAncestorOf(widget)) for b in win_btns)
-            lpos = self.mapFromGlobal(pos)
-        else:
-            lpos = pos
+        lpos = self.mapFromGlobal(pos) if is_global else pos
 
         for b in win_btns:
             if b is not None and b.isVisible():
@@ -2168,6 +2162,8 @@ class Klipwerk(QMainWindow):
             log.exception("failed to save settings")
 
         self._set_resize_cursor(None)
+        if hasattr(self, "_timer") and self._timer.isActive():
+            self._timer.stop()
         if self.cap:
             self.cap.release()
         if self._worker and self._worker.isRunning():

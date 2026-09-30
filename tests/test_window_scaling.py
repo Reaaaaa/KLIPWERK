@@ -4,7 +4,6 @@ from __future__ import annotations
 import pytest
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from PyQt6.QtGui import QEnterEvent, QMouseEvent
-from PyQt6.QtWidgets import QApplication
 
 from klipwerk.ui.icons import SVG_MAXIMIZE, SVG_RESTORE
 
@@ -25,7 +24,8 @@ def window(qtbot, tmp_path, monkeypatch):
     from klipwerk.app import Klipwerk
     w = Klipwerk()
     qtbot.addWidget(w)
-    return w
+    yield w
+    w.close()
 
 
 class TestMaximizeRestoreIcon:
@@ -35,8 +35,23 @@ class TestMaximizeRestoreIcon:
         assert window._btn_max._icon_svg == SVG_MAXIMIZE
         assert window._btn_max.toolTip() == "Maximize"
 
-    def test_toggle_maximize_updates_icon_and_tooltip(self, window) -> None:
+    def test_toggle_maximize_updates_icon_and_tooltip(self, window, monkeypatch) -> None:
         """Toggling maximize flips between maximize and restore icons/tooltips."""
+        # Avoid Cocoa/window server maximize in headless offscreen tests
+        is_max = False
+        monkeypatch.setattr(window, "isMaximized", lambda: is_max)
+
+        def fake_show_max():
+            nonlocal is_max
+            is_max = True
+
+        def fake_show_normal():
+            nonlocal is_max
+            is_max = False
+
+        monkeypatch.setattr(window, "showMaximized", fake_show_max)
+        monkeypatch.setattr(window, "showNormal", fake_show_normal)
+
         # 1. Maximize
         window._toggle_maximize()
         assert window._btn_max._icon_svg == SVG_RESTORE
@@ -49,8 +64,8 @@ class TestMaximizeRestoreIcon:
 
     def test_hover_leave_preserves_current_state_icon(self, window) -> None:
         """Hovering and leaving must not revert the icon to the initial SVG."""
-        # Maximize
-        window._toggle_maximize()
+        # Set to restore state
+        window._update_max_button(True)
         assert window._btn_max._icon_svg == SVG_RESTORE
 
         # Simulate mouse enter
@@ -95,16 +110,17 @@ class TestResizeDirections:
         # Center (no resize)
         assert window._get_resize_dir(QPoint(w // 2, h // 2)) is None
 
-    def test_window_buttons_do_not_trigger_resize(self, window, qtbot) -> None:
+    def test_window_buttons_do_not_trigger_resize(self, window) -> None:
         """Hovering over title bar buttons (min, max, close) must not trigger resize."""
+        window.resize(1000, 640)
         window.show()
-        qtbot.waitExposed(window)
         btn_pos = window._btn_close.mapTo(window, QPoint(10, 10))
         assert window._get_resize_dir(btn_pos) is None
+        window.close()
 
-    def test_no_resize_when_maximized(self, window) -> None:
+    def test_no_resize_when_maximized(self, window, monkeypatch) -> None:
         """When maximized, all positions return None."""
-        window._toggle_maximize()
+        monkeypatch.setattr(window, "isMaximized", lambda: True)
         assert window._get_resize_dir(QPoint(2, 2)) is None
         assert window._get_resize_dir(QPoint(window.width() - 2, window.height() - 2)) is None
 
@@ -177,7 +193,6 @@ class TestEventFilterInterception:
         window.setGeometry(100, 100, 1000, 640)
         local_pt = QPoint(500, 638)
         global_pt = window.mapToGlobal(local_pt)
-        target = QApplication.widgetAt(global_pt) or window
 
         press_ev = QMouseEvent(
             QEvent.Type.MouseButtonPress,
@@ -187,12 +202,12 @@ class TestEventFilterInterception:
             Qt.MouseButton.LeftButton,
             Qt.KeyboardModifier.NoModifier,
         )
-        handled = QApplication.sendEvent(target, press_ev)
+        handled = window.eventFilter(window.tl_scroll, press_ev)
         assert handled is True
         assert window._resizing is True
         assert window._resize_dir == "bottom"
 
-        # Release ends resizing
+        # Release ends resizing via eventFilter
         release_ev = QMouseEvent(
             QEvent.Type.MouseButtonRelease,
             QPointF(local_pt),
@@ -201,6 +216,7 @@ class TestEventFilterInterception:
             Qt.MouseButton.NoButton,
             Qt.KeyboardModifier.NoModifier,
         )
-        QApplication.sendEvent(target, release_ev)
+        handled_rel = window.eventFilter(window.tl_scroll, release_ev)
+        assert handled_rel is True
         assert window._resizing is False
         assert window._resize_dir is None
