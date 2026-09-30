@@ -47,3 +47,8 @@ bin/
 *.exe
 *.AppImage
 *.dmg
+*.zip
+*.tar.gz
+klipwerk-backup.bat
+/__init__.py
+.aider*

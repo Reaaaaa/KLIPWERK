@@ -1,11 +1,11 @@
 """The Klipwerk main window.
 
 Orchestration-only: most of the heavy lifting lives in submodules
-(``workers``, ``widgets``, ``sidebar``, ``history``, ``core``).
+(`workers`, `widgets`, `sidebar`, `history`, `core`).
 
 Organized into four loose sections separated by the big banner comments:
 
-1. Setup: ``__init__``, UI build, shortcuts, tooltips, K/C mode
+1. Setup: `__init__`, UI build, shortcuts, tooltips, K/C mode
 2. Video loading, playback, seeking
 3. Crop, Mark In/Out, clip CRUD, undo/redo
 4. Export
@@ -114,7 +114,8 @@ class Klipwerk(QMainWindow):
     """Top-level window. Owns all state and wires subwidgets together."""
 
     # Resize handling for the frameless window
-    _RESIZE_MARGIN = 6
+    _RESIZE_MARGIN = 8
+    _CORNER_MARGIN = 14
 
     def __init__(self):
         super().__init__()
@@ -129,10 +130,11 @@ class Klipwerk(QMainWindow):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self._drag_pos: QPoint | None = None
-        self._resizing = False
+        self._resizing: bool = False
         self._resize_dir: str | None = None
         self._resize_start_geo: QRect | None = None
         self._resize_start_pos: QPoint | None = None
+        self._active_cursor_shape: Qt.CursorShape | None = None
 
         # ── State ──────────────────────────────────────────────────
         self.video_path: str | None = None
@@ -146,6 +148,8 @@ class Klipwerk(QMainWindow):
         self.crop_rect: CropRect | None = None
         self.mark_in: float = 0.0
         self.mark_out: float = 0.0
+        self._has_mark_in: bool = False
+        self._has_mark_out: bool = False
 
         self.clips: list[Clip] = []
         self.history = History(self.clips)
@@ -178,16 +182,19 @@ class Klipwerk(QMainWindow):
         self._timer.setInterval(33)
         self._timer.timeout.connect(self._tick)
 
-        # Cursor / resize handling for the frameless window needs global
-        # mouse events, otherwise child widgets swallow them first.
-        self.centralWidget().setMouseTracking(True)
-        self.setMouseTracking(True)
+        # Enable mouse tracking on the window hierarchy so hover & resize events
+        # are received reliably.
+        self._enable_mouse_tracking(self)
         QApplication.instance().installEventFilter(self)
 
         # Restore user preferences (geometry, export defaults, K/C mode).
         # Must happen after _build_ui so the widgets exist.
         self._apply_settings()
 
+    def _enable_mouse_tracking(self, widget: QWidget) -> None:
+        widget.setMouseTracking(True)
+        for child in widget.findChildren(QWidget):
+            child.setMouseTracking(True)
     # ── Top-level build ────────────────────────────────────────────
     def _build_ui(self) -> None:
         central = QWidget()
@@ -234,7 +241,9 @@ class Klipwerk(QMainWindow):
         btn_min.clicked.connect(self.showMinimized)
         btn_max.clicked.connect(self._toggle_maximize)
         btn_close.clicked.connect(self.close)
+        self._btn_min = btn_min
         self._btn_max = btn_max
+        self._btn_close = btn_close
 
         lay.addWidget(logo)
         lay.addWidget(sep)
@@ -261,17 +270,20 @@ class Klipwerk(QMainWindow):
         b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         b.setIcon(make_icon(svg_tpl, MUTED2, 14))
         b.setIconSize(QSize(14, 14))
+        b._icon_svg = svg_tpl  # track current SVG shape for hover recolor
         b.setStyleSheet(
             f"QPushButton {{ background:transparent; border:none;"
             f" border-radius:6px; padding:0; }}"
             f"QPushButton:hover {{ background:{hover_bg}; }}"
         )
 
-        def on_enter(_event, _svg=svg_tpl, _color=hover_icon):
-            b.setIcon(make_icon(_svg, _color, 14))
+        def on_enter(_event, _btn=b):
+            svg = getattr(_btn, '_icon_svg', svg_tpl)
+            _btn.setIcon(make_icon(svg, hover_icon, 14))
 
-        def on_leave(_event, _svg=svg_tpl):
-            b.setIcon(make_icon(_svg, MUTED2, 14))
+        def on_leave(_event, _btn=b):
+            svg = getattr(_btn, '_icon_svg', svg_tpl)
+            _btn.setIcon(make_icon(svg, MUTED2, 14))
 
         b.enterEvent = on_enter   # type: ignore[assignment]
         b.leaveEvent = on_leave   # type: ignore[assignment]
@@ -300,8 +312,8 @@ class Klipwerk(QMainWindow):
         # Right side — sidebar
         self.sidebar: SidebarRefs = build_sidebar(
             on_crop_changed=self._on_crop_fields_changed,
-            on_mark_in_changed=lambda v: setattr(self, "mark_in", v),
-            on_mark_out_changed=lambda v: setattr(self, "mark_out", v),
+            on_mark_in_changed=self._on_sidebar_mark_in,
+            on_mark_out_changed=self._on_sidebar_mark_out,
             on_fmt_changed=self._on_fmt_changed,
             on_prefix_changed=lambda _: self._update_fname_preview(),
             on_suffix_crop_changed=lambda _: self._update_fname_preview(),
@@ -358,6 +370,11 @@ class Klipwerk(QMainWindow):
         self.btn_in.setDisabled(True)
         self.btn_out.setDisabled(True)
 
+        self.btn_clear_marks = btn("✕  Clear In/Out", danger=True, compact=True)
+        self.btn_clear_marks.setFixedHeight(32)
+        self.btn_clear_marks.clicked.connect(self._clear_marks)
+        self.btn_clear_marks.setDisabled(True)
+
         self.btn_add_clip = btn("+  Add Klip", compact=True)
         self.btn_add_clip.setFixedHeight(32)
         self.btn_add_clip.clicked.connect(self._add_clip)
@@ -412,6 +429,7 @@ class Klipwerk(QMainWindow):
         lay.addWidget(sep)
         lay.addWidget(self.btn_in)
         lay.addWidget(self.btn_out)
+        lay.addWidget(self.btn_clear_marks)
         lay.addWidget(self.btn_add_clip)
         lay.addWidget(sep2)
         lay.addStretch()
@@ -433,6 +451,8 @@ class Klipwerk(QMainWindow):
         self.scrubber = ScrubberWidget()
         self.scrubber.seeked.connect(self._seek)
         self.scrubber.hoverTime.connect(self._on_scrubber_hover)
+        self.scrubber.markerMoved.connect(self._on_marker_dragged)
+        self.scrubber.markerDragFinished.connect(self._on_marker_drag_finished)
 
         self.btn_prev = btn("◀◀"); self.btn_prev.setFixedSize(42, 36)
         self.btn_next = btn("▶▶"); self.btn_next.setFixedSize(42, 36)
@@ -556,6 +576,7 @@ class Klipwerk(QMainWindow):
         sc("Shift+I",      lambda: self._seek_to(self.mark_in))
         sc("Shift+O",      lambda: self._seek_to(self.mark_out))
         sc("C",            self._add_clip)
+        sc("Alt+X",        self._clear_marks)
         sc("Left",         lambda: self._step(-1))
         sc("Right",        lambda: self._step(1))
         sc("Shift+Left",   lambda: self._step(-10))
@@ -610,6 +631,7 @@ class Klipwerk(QMainWindow):
         self.btn_crop_clr.setToolTip(T("Clear crop selection"))
         self.btn_in.setToolTip(T("Set In marker  (I)\nShift+I → jump to In marker\nStart point for the next klip."))
         self.btn_out.setToolTip(T("Set Out marker  (O)\nShift+O → jump to Out marker\nEnd point for the next klip."))
+        self.btn_clear_marks.setToolTip(T("Clear In and Out markers  (Alt+X)"))
         self.btn_add_clip.setToolTip(T(
             "Create klip from the marked range (In → Out)  (C)"
         ))
@@ -756,21 +778,34 @@ class Klipwerk(QMainWindow):
         self._update_fname_preview()
 
     # ── Frameless window chrome ────────────────────────────────────
+    def _update_max_button(self, is_max: bool) -> None:
+        if not hasattr(self, "_btn_max"):
+            return
+        icon_svg = SVG_RESTORE if is_max else SVG_MAXIMIZE
+        tip = "Restore" if is_max else "Maximize"
+        self._btn_max._icon_svg = icon_svg
+        self._btn_max.setToolTip(tip)
+        color = TEXT if self._btn_max.underMouse() else MUTED2
+        self._btn_max.setIcon(make_icon(icon_svg, color, 14))
+
     def _toggle_maximize(self) -> None:
+        self._drag_pos = None
         if self.isMaximized():
             self.showNormal()
-            self._btn_max.setIcon(make_icon(SVG_MAXIMIZE, MUTED2, 14))
+            self._update_max_button(False)
         else:
             self.showMaximized()
-            self._btn_max.setIcon(make_icon(SVG_RESTORE, MUTED2, 14))
+            self._update_max_button(True)
+
+    def changeEvent(self, event: QEvent) -> None:
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._update_max_button(self.isMaximized())
+        super().changeEvent(event)
 
     def _toggle_info_panel(self) -> None:
         visible = not self.sidebar.info_panel.isVisible()
         self.sidebar.info_panel.setVisible(visible)
         self.sidebar.info_toggle_lbl.setText("— click to collapse" if visible else "— click to expand")
-
-    # =============================================================
-    # Section 2 — Video load, playback, seeking
     # =============================================================
     def _open_file_dialog(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -898,7 +933,13 @@ class Klipwerk(QMainWindow):
         sb.mark_out_spin.blockSignals(True)
         sb.mark_out_spin.setValue(round(self.duration, 2))
         sb.mark_out_spin.blockSignals(False)
-        self.scrubber.set_markers(0.0, 1.0)
+        self.mark_in = 0.0
+        self.mark_out = self.duration
+        self._has_mark_in = False
+        self._has_mark_out = False
+        self.scrubber.set_markers(0.0, 1.0, has_in=False, has_out=False)
+        if hasattr(self, "btn_clear_marks"):
+            self.btn_clear_marks.setEnabled(False)
 
     def _autofill_export_format(self, v_codec: str) -> None:
         idx = pick_default_for(v_codec)
@@ -953,11 +994,15 @@ class Klipwerk(QMainWindow):
 
         self._autopause_out = False
         self.btn_autopause.setChecked(False)
-        for b in (self.btn_crop, self.btn_in, self.btn_out, self.btn_add_clip,
+        for b in (self.btn_crop, self.btn_in, self.btn_out, self.btn_clear_marks, self.btn_add_clip,
                   self.btn_prev, self.btn_play, self.btn_next,
                   self.btn_close_vid, self.btn_preview_seq, self.btn_autopause):
             b.setEnabled(False)
         self.scrubber.clear_video()
+        self._has_mark_in = False
+        self._has_mark_out = False
+        self.mark_in = 0.0
+        self.mark_out = 0.0
         self.timecode.setText("--:--:-- / --:--:--")
         self.in_label.setText("In: --:--:--")
         self.out_label.setText("Out: --:--:--")
@@ -1038,12 +1083,22 @@ class Klipwerk(QMainWindow):
         self.scrubber.set_position(pct)
         in_pct  = self.mark_in  / self.duration if self.duration else 0.0
         out_pct = self.mark_out / self.duration if self.duration else 1.0
-        self.scrubber.set_markers(in_pct, out_pct)
+        self.scrubber.set_markers(
+            in_pct, out_pct,
+            has_in=self._has_mark_in,
+            has_out=self._has_mark_out,
+        )
         self.timecode.setText(f"{self._fmt_hms(self.current_t)} / {self._fmt_hms(self.duration)}")
-        if self.mark_in > 0:
+        if self._has_mark_in:
             self.in_label.setText(f"In: {self._fmt_hms(self.mark_in)}")
-        if self.mark_out < self.duration:
+        else:
+            self.in_label.setText("In: --:--:--")
+        if self._has_mark_out:
             self.out_label.setText(f"Out: {self._fmt_hms(self.mark_out)}")
+        else:
+            self.out_label.setText("Out: --:--:--")
+        if hasattr(self, "btn_clear_marks"):
+            self.btn_clear_marks.setEnabled(self._has_mark_in or self._has_mark_out)
 
     @staticmethod
     def _fmt_hms(s: float) -> str:
@@ -1196,15 +1251,69 @@ class Klipwerk(QMainWindow):
         t = self.current_t
         if which == "in":
             self.mark_in = t
+            self._has_mark_in = True
             self.sidebar.mark_in_spin.blockSignals(True)
             self.sidebar.mark_in_spin.setValue(t)
             self.sidebar.mark_in_spin.blockSignals(False)
         else:
             self.mark_out = t
+            self._has_mark_out = True
             self.sidebar.mark_out_spin.blockSignals(True)
             self.sidebar.mark_out_spin.setValue(t)
             self.sidebar.mark_out_spin.blockSignals(False)
         self._update_scrubber()
+
+    def _clear_marks(self) -> None:
+        self._has_mark_in = False
+        self._has_mark_out = False
+        self.mark_in = 0.0
+        self.mark_out = self.duration
+        sb = self.sidebar
+        sb.mark_in_spin.blockSignals(True)
+        sb.mark_in_spin.setValue(0.0)
+        sb.mark_in_spin.blockSignals(False)
+        sb.mark_out_spin.blockSignals(True)
+        sb.mark_out_spin.setValue(round(self.duration, 2))
+        sb.mark_out_spin.blockSignals(False)
+        self.scrubber.clear_markers()
+        self.in_label.setText("In: --:--:--")
+        self.out_label.setText("Out: --:--:--")
+        if hasattr(self, "btn_clear_marks"):
+            self.btn_clear_marks.setEnabled(False)
+
+    def _on_sidebar_mark_in(self, v: float) -> None:
+        self.mark_in = v
+        self._has_mark_in = True
+        self._update_scrubber()
+
+    def _on_sidebar_mark_out(self, v: float) -> None:
+        self.mark_out = v
+        self._has_mark_out = True
+        self._update_scrubber()
+
+    def _on_marker_dragged(self, which: str, t: float) -> None:
+        if not self.video_path or not self.duration:
+            return
+        if which == "in":
+            self.mark_in = t
+            self._has_mark_in = True
+            self.sidebar.mark_in_spin.blockSignals(True)
+            self.sidebar.mark_in_spin.setValue(round(t, 2))
+            self.sidebar.mark_in_spin.blockSignals(False)
+        else:
+            self.mark_out = t
+            self._has_mark_out = True
+            self.sidebar.mark_out_spin.blockSignals(True)
+            self.sidebar.mark_out_spin.setValue(round(t, 2))
+            self.sidebar.mark_out_spin.blockSignals(False)
+
+        if hasattr(self, "btn_clear_marks"):
+            self.btn_clear_marks.setEnabled(True)
+
+        self._seek_to(t)
+
+    def _on_marker_drag_finished(self, which: str, t: float) -> None:
+        self._on_marker_dragged(which, t)
 
     # ── Clip CRUD ──────────────────────────────────────────────────
     def _add_clip(self) -> None:
@@ -1710,126 +1819,233 @@ class Klipwerk(QMainWindow):
     # =============================================================
     # Frameless-window event handling
     # =============================================================
-    def eventFilter(self, obj, event):
-        from PyQt6.QtWidgets import QAbstractScrollArea, QScrollBar
+    def _is_our_widget(self, obj) -> bool:
+        if obj is self or obj is getattr(self, "windowHandle", lambda: None)():
+            return True
+        if isinstance(obj, QWidget):
+            return self.isAncestorOf(obj)
+        return False
 
-        if event.type() == QEvent.Type.Polish and isinstance(obj, QScrollBar):
-            obj.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+    def _is_on_win_button(self, pos: QPoint, is_global: bool = True) -> bool:
+        win_btns = (
+            getattr(self, "_btn_min", None),
+            getattr(self, "_btn_max", None),
+            getattr(self, "_btn_close", None),
+        )
+        if is_global:
+            widget = QApplication.widgetAt(pos)
+            if widget is not None:
+                return any(b is not None and (widget is b or b.isAncestorOf(widget)) for b in win_btns)
+            lpos = self.mapFromGlobal(pos)
+        else:
+            lpos = pos
+
+        for b in win_btns:
+            if b is not None and b.isVisible():
+                b_rect = QRect(b.mapTo(self, QPoint(0, 0)), b.size())
+                if b_rect.contains(lpos):
+                    return True
+        return False
+
+    def _is_in_titlebar(self, gpos: QPoint) -> bool:
+        if not hasattr(self, "_titlebar"):
             return False
+        tpos = self._titlebar.mapFromGlobal(gpos)
+        if not self._titlebar.rect().contains(tpos):
+            return False
+        return not self._is_on_win_button(gpos, is_global=True)
 
-        if event.type() == QEvent.Type.MouseMove:
-            widget_under = None
-            try:
-                widget_under = QApplication.widgetAt(event.globalPosition().toPoint())
-            except (AttributeError, RuntimeError):
-                pass
-            is_scrollbar = isinstance(widget_under, (QScrollBar, QAbstractScrollArea))
+    def _get_resize_dir(self, pos: QPoint) -> str | None:
+        if self.isMaximized() or self._is_on_win_button(pos, is_global=False):
+            return None
+        w, h = self.width(), self.height()
+        x, y = pos.x(), pos.y()
+        m = self._RESIZE_MARGIN
+        c = self._CORNER_MARGIN
 
-            if not self._resizing and not self._drag_pos and not is_scrollbar:
-                try:
-                    gpos = event.globalPosition().toPoint()
-                    local = self.mapFromGlobal(gpos)
-                    d = self._get_resize_dir(local)
-                    cursors = {
-                        "left":         Qt.CursorShape.SizeHorCursor,
-                        "right":        Qt.CursorShape.SizeHorCursor,
-                        "top":          Qt.CursorShape.SizeVerCursor,
-                        "bottom":       Qt.CursorShape.SizeVerCursor,
-                        "top-left":     Qt.CursorShape.SizeFDiagCursor,
-                        "top-right":    Qt.CursorShape.SizeBDiagCursor,
-                        "bottom-left":  Qt.CursorShape.SizeBDiagCursor,
-                        "bottom-right": Qt.CursorShape.SizeFDiagCursor,
-                    }
-                    if d:
-                        QApplication.setOverrideCursor(QCursor(cursors[d]))
-                    else:
-                        QApplication.restoreOverrideCursor()
-                except (AttributeError, RuntimeError):
-                    pass
-            elif is_scrollbar:
+        if x < -m or x > w + m or y < -m or y > h + m:
+            return None
+
+        at_left_c = x < c
+        at_right_c = x > w - c
+        at_top_c = y < c
+        at_bottom_c = y > h - c
+
+        if at_top_c and at_left_c:
+            return "top-left"
+        if at_top_c and at_right_c:
+            return "top-right"
+        if at_bottom_c and at_left_c:
+            return "bottom-left"
+        if at_bottom_c and at_right_c:
+            return "bottom-right"
+
+        if x < m:
+            return "left"
+        if x > w - m:
+            return "right"
+        if y < m:
+            return "top"
+        if y > h - m:
+            return "bottom"
+
+        return None
+
+    def _set_resize_cursor(self, shape: Qt.CursorShape | None) -> None:
+        if shape == self._active_cursor_shape:
+            return
+        if shape is None:
+            if self._active_cursor_shape is not None:
                 QApplication.restoreOverrideCursor()
+                self._active_cursor_shape = None
+        else:
+            if self._active_cursor_shape is not None:
+                QApplication.changeOverrideCursor(QCursor(shape))
+            else:
+                QApplication.setOverrideCursor(QCursor(shape))
+            self._active_cursor_shape = shape
 
-            if self._resizing and (event.buttons() & Qt.MouseButton.LeftButton):
-                self._do_resize(event.globalPosition().toPoint())
+    def _do_resize(self, global_pos: QPoint) -> None:
+        if self._resize_start_geo is None or self._resize_start_pos is None or not self._resize_dir:
+            return
+        delta = global_pos - self._resize_start_pos
+        start = self._resize_start_geo
+        d = self._resize_dir
+        min_w, min_h = self.minimumWidth(), self.minimumHeight()
 
-        elif event.type() == QEvent.Type.MouseButtonRelease and self._resizing:
-            self._resizing = False
-            self._resize_dir = None
-            QApplication.restoreOverrideCursor()
+        x0, y0, w0, h0 = start.x(), start.y(), start.width(), start.height()
+        r0 = x0 + w0
+        b0 = y0 + h0
+
+        new_x, new_y, new_w, new_h = x0, y0, w0, h0
+
+        if "left" in d:
+            new_w = max(min_w, w0 - delta.x())
+            new_x = r0 - new_w
+        elif "right" in d:
+            new_w = max(min_w, w0 + delta.x())
+
+        if "top" in d:
+            new_h = max(min_h, h0 - delta.y())
+            new_y = b0 - new_h
+        elif "bottom" in d:
+            new_h = max(min_h, h0 + delta.y())
+
+        target_geo = QRect(new_x, new_y, new_w, new_h)
+        if target_geo != self.geometry():
+            self.setGeometry(target_geo)
+
+    def _stop_resizing(self) -> None:
+        self._resizing = False
+        self._resize_dir = None
+        self._resize_start_geo = None
+        self._resize_start_pos = None
+        self._set_resize_cursor(None)
+
+    def eventFilter(self, obj, event):
+        etype = event.type()
+
+        # Keep child widgets mouse-tracking enabled when dynamically added
+        if etype == QEvent.Type.ChildAdded and hasattr(event, "child"):
+            ch = event.child()
+            if isinstance(ch, QWidget):
+                ch.setMouseTracking(True)
+            return super().eventFilter(obj, event)
+
+        if not self._is_our_widget(obj):
+            return super().eventFilter(obj, event)
+
+        cursors = {
+            "left":         Qt.CursorShape.SizeHorCursor,
+            "right":        Qt.CursorShape.SizeHorCursor,
+            "top":          Qt.CursorShape.SizeVerCursor,
+            "bottom":       Qt.CursorShape.SizeVerCursor,
+            "top-left":     Qt.CursorShape.SizeFDiagCursor,
+            "top-right":    Qt.CursorShape.SizeBDiagCursor,
+            "bottom-left":  Qt.CursorShape.SizeBDiagCursor,
+            "bottom-right": Qt.CursorShape.SizeFDiagCursor,
+        }
+
+        if etype == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            gpos = event.globalPosition().toPoint()
+            if self._is_on_win_button(gpos):
+                return super().eventFilter(obj, event)
+
+            local = self.mapFromGlobal(gpos)
+            d = self._get_resize_dir(local)
+            if d and not self.isMaximized():
+                self._resizing = True
+                self._resize_dir = d
+                self._resize_start_geo = self.geometry()
+                self._resize_start_pos = gpos
+                self._drag_pos = None
+                return True
+
+            if self._is_in_titlebar(gpos) and not self.isMaximized():
+                self._drag_pos = gpos - self.frameGeometry().topLeft()
+                self._resizing = False
+                return True
+
+        elif etype == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
+            gpos = event.globalPosition().toPoint()
+            if self._is_in_titlebar(gpos):
+                self._toggle_maximize()
+                return True
+
+        elif etype in (QEvent.Type.MouseMove, QEvent.Type.HoverMove):
+            gpos = event.globalPosition().toPoint() if hasattr(event, "globalPosition") else QCursor.pos()
+            if self._resizing:
+                if event.buttons() & Qt.MouseButton.LeftButton:
+                    self._do_resize(gpos)
+                    return True
+                else:
+                    self._stop_resizing()
+                    return False
+
+            if self._drag_pos:
+                if event.buttons() & Qt.MouseButton.LeftButton:
+                    self.move(gpos - self._drag_pos)
+                    return True
+                else:
+                    self._drag_pos = None
+                    return False
+
+            if self.isMaximized() or self._is_on_win_button(gpos):
+                self._set_resize_cursor(None)
+                return super().eventFilter(obj, event)
+
+            local = self.mapFromGlobal(gpos)
+            d = self._get_resize_dir(local)
+            if d:
+                self._set_resize_cursor(cursors[d])
+            else:
+                self._set_resize_cursor(None)
+
+        elif etype == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+            if self._resizing:
+                self._stop_resizing()
+                return True
+            if self._drag_pos:
+                self._drag_pos = None
+                return True
+
+        elif etype == QEvent.Type.Leave and obj is self:
+            if not self._resizing:
+                self._set_resize_cursor(None)
 
         return super().eventFilter(obj, event)
 
     def mousePressEvent(self, event) -> None:
-        if event.button() != Qt.MouseButton.LeftButton:
-            return
-        pos = event.position().toPoint()
-        in_titlebar = self._titlebar.geometry().contains(pos)
-        if in_titlebar and not self.isMaximized():
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-        else:
-            self._drag_pos = None
-        self._resize_dir = self._get_resize_dir(pos)
-        if self._resize_dir:
-            self._resizing = True
-            self._resize_start_geo = self.geometry()
-            self._resize_start_pos = event.globalPosition().toPoint()
-            QApplication.restoreOverrideCursor()
+        super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
-        if self._drag_pos and (event.buttons() & Qt.MouseButton.LeftButton):
-            self.move(event.globalPosition().toPoint() - self._drag_pos)
+        super().mouseMoveEvent(event)
 
-    def mouseReleaseEvent(self, _event) -> None:
-        self._drag_pos = None
-        self._resizing = False
-        self._resize_dir = None
+    def mouseReleaseEvent(self, event) -> None:
+        super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:
-        if self._titlebar.geometry().contains(event.position().toPoint()):
-            self._toggle_maximize()
-
-    def _get_resize_dir(self, pos: QPoint) -> str | None:
-        if self.isMaximized():
-            return None
-        m = self._RESIZE_MARGIN
-        x, y, w, h = pos.x(), pos.y(), self.width(), self.height()
-        left, right = x < m, x > w - m
-        top, bottom = y < m, y > h - m
-        if top and left:  return "top-left"
-        if top and right: return "top-right"
-        if bottom and left:  return "bottom-left"
-        if bottom and right: return "bottom-right"
-        if left:   return "left"
-        if right:  return "right"
-        if top:    return "top"
-        if bottom: return "bottom"
-        return None
-
-    def _do_resize(self, global_pos: QPoint) -> None:
-        if self._resize_start_geo is None or self._resize_start_pos is None:
-            return
-        delta = global_pos - self._resize_start_pos
-        geo = QRect(self._resize_start_geo)
-        d = self._resize_dir or ""
-        min_w, min_h = self.minimumWidth(), self.minimumHeight()
-        if "left" in d:
-            geo.setLeft(min(geo.left() + delta.x(), geo.right() - min_w))
-        if "right" in d:
-            geo.setRight(max(geo.right() + delta.x(), geo.left() + min_w))
-        if "top" in d:
-            geo.setTop(min(geo.top() + delta.y(), geo.bottom() - min_h))
-        if "bottom" in d:
-            geo.setBottom(max(geo.bottom() + delta.y(), geo.top() + min_h))
-        # Resize goes through setGeometry which triggers a full layout
-        # + paint cycle on every mouse-move event. On Windows the
-        # compositor does its own DWM work on top, so we see visible
-        # flicker. Qt's resize() is slightly cheaper than setGeometry()
-        # when the position isn't changing — split the two cases so the
-        # common "drag the bottom-right corner" path doesn't reposition.
-        if geo.topLeft() == self._resize_start_geo.topLeft():
-            self.resize(geo.size())
-        else:
-            self.setGeometry(geo)
+        super().mouseDoubleClickEvent(event)
 
     # ── Status + cleanup ────────────────────────────────────────────
     def _set_status(self, text: str, color: str = ACC) -> None:
@@ -1854,6 +2070,7 @@ class Klipwerk(QMainWindow):
         blob = s.geometry()
         if blob is not None:
             self.restoreGeometry(blob)
+        self._update_max_button(self.isMaximized())
 
         # Filename prefix / per-mode suffixes — plain text, no signal cascade.
         self.sidebar.export_prefix.setText(s.prefix(default=""))
@@ -1941,6 +2158,7 @@ class Klipwerk(QMainWindow):
             if 0 <= gif_w_idx < len(_gif_width_values) else 0,
         )
 
+
     def closeEvent(self, event) -> None:
         # Persist first — if QSettings can't write for some OS reason,
         # we still want the worker cleanup below to run.
@@ -1949,6 +2167,7 @@ class Klipwerk(QMainWindow):
         except Exception:
             log.exception("failed to save settings")
 
+        self._set_resize_cursor(None)
         if self.cap:
             self.cap.release()
         if self._worker and self._worker.isRunning():

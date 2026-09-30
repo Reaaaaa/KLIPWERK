@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0]
+
+### Added
+- **"Clear In/Out" toolbar button & shortcut**:
+  - Added a dedicated `✕ Clear In/Out` danger button in the top toolbar next to `[ In` and `Out ]` to reset accidentally set cut points.
+  - Added `Alt`+`X` keyboard shortcut to quickly clear In and Out markers.
+  - Button auto-enables whenever In or Out marks are set or adjusted, and auto-disables on clear or close.
+  - Fully resets timeline markers, range highlights, sidebar In/Out spinboxes, and timecode labels (`In: --:--:--` / `Out: --:--:--`).
+- **Enlarged In/Out timeline markers with Drag & Drop**:
+  - Replaced small marker triangles with prominent 16×16 px pentagon badges labeled "I" (cyan) and "O" (coral), complete with a vertical needle line through the track for precise visual alignment.
+  - Interactive horizontal drag & drop: hover changes cursor to `SizeHorCursor` with an active white outline; dragging repositions markers smoothly along the timeline.
+  - Collision clamping: In marker cannot be dragged past Out; Out marker cannot be dragged before In.
+  - Live video preview: scrubbing/dragging an In or Out marker seeks video frames in real-time, syncing sidebar spinboxes and timecode displays immediately.
+- **Unit test suites**:
+  - `tests/test_markers_and_scrubber.py`: 11 tests covering marker hit-testing, drag & drop, clamping, hover cursor changes, and state resets.
+  - `tests/test_window_scaling.py`: 12 tests covering 8-way resize hit testing, window state maximize/restore icon synchronization, and hover persistence.
+
+### Fixed
+- **Frameless window resizing glitches and edge detection**:
+  - Resolved window resizing flicker and cursor thrashing by using `QApplication.changeOverrideCursor()` and atomic `setGeometry()` calculations instead of separate `resize()` and `move()` steps.
+  - Implemented full 8-direction resize detection (left, right, top, bottom, and all 4 corners with a 14 px corner hit zone).
+  - Fixed event swallowing on the bottom and right window edges where child scroll areas (`QAbstractScrollArea`) previously consumed mouse press events before resizing could trigger.
+- **Window titlebar maximize / restore icon inconsistency**:
+  - Synchronized the maximize button icon and tooltip with native window state (`SVG_MAXIMIZE` when windowed, `SVG_RESTORE` when maximized/fullscreen).
+  - Removed unstable polling timer in favor of Qt's native `changeEvent(QEvent.Type.WindowStateChange)`.
+
 ## [0.4.1]
 
 ### Fixed
