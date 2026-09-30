@@ -15,11 +15,13 @@ def preview(qtbot):
     p = PreviewWidget()
     p.resize(800, 600)
     # Simulate a 1920x1080 video frame loaded
-    pix = QPixmap(1920, 1080)
+    pix = QPixmap(320, 180)
     pix.fill(Qt.GlobalColor.black)
     p.set_frame(pix, 1920, 1080)
     qtbot.addWidget(p)
-    return p
+    yield p
+    p.unsetCursor()
+    p.close()
 
 
 class TestCropHitTest:
@@ -132,6 +134,16 @@ class TestCropMove:
         assert preview.crop_rect.left() == img.left()
         assert preview.crop_rect.top() == img.top()
 
+        release_ev = QMouseEvent(
+            QMouseEvent.Type.MouseButtonRelease,
+            QPointF(drag_far_away),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        preview.mouseReleaseEvent(release_ev)
+        assert preview._drag_mode is None
+
 
 class TestCropAspectPreservingScale:
     def test_corner_drag_maintains_9_16_ratio(self, preview) -> None:
@@ -172,6 +184,16 @@ class TestCropAspectPreservingScale:
         actual_ratio = cr_after.width() / cr_after.height()
         assert actual_ratio == pytest.approx(expected_ratio, abs=0.03)
 
+        release_ev = QMouseEvent(
+            QMouseEvent.Type.MouseButtonRelease,
+            QPointF(target_pt),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        preview.mouseReleaseEvent(release_ev)
+        assert preview._drag_mode is None
+
     def test_corner_drag_maintains_1_1_ratio(self, preview) -> None:
         preview.set_aspect_ratio((1, 1))
         preview.set_crop_from_video(800, 300, 400, 400)
@@ -201,6 +223,16 @@ class TestCropAspectPreservingScale:
         # Width and height must be identical (1:1) within 1 px
         assert abs(cr_after.width() - cr_after.height()) <= 1
 
+        release_ev = QMouseEvent(
+            QMouseEvent.Type.MouseButtonRelease,
+            QPointF(target_pt),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        preview.mouseReleaseEvent(release_ev)
+        assert preview._drag_mode is None
+
 
 class TestPresetButtonsAndAppIntegration:
     @pytest.fixture
@@ -208,7 +240,7 @@ class TestPresetButtonsAndAppIntegration:
         from klipwerk import app as app_mod
         ini_path = str(tmp_path / "test.ini")
         real_settings_cls = app_mod.Settings
-        monkeypatch.setattr(app_mod, "Settings", lambda *a, **kw: real_settings_cls(ini_path))
+        monkeypatch.setattr(app_mod, "Settings", lambda: real_settings_cls(ini_path))
         from klipwerk.app import Klipwerk
         w = Klipwerk()
         qtbot.addWidget(w)
@@ -221,8 +253,8 @@ class TestPresetButtonsAndAppIntegration:
 
     def test_clicking_preset_sets_aspect_ratio_and_checks_button(self, app_window) -> None:
         sb = app_window.sidebar
-        preset_9_16 = [b for b in sb.preset_btns if b.text() == "9:16"][0]
-        preset_16_9 = [b for b in sb.preset_btns if b.text() == "16:9"][0]
+        preset_9_16 = next(b for b in sb.preset_btns if b.text() == "9:16")
+        preset_16_9 = next(b for b in sb.preset_btns if b.text() == "16:9")
 
         # Click 9:16
         preset_9_16.click()
@@ -242,7 +274,7 @@ class TestPresetButtonsAndAppIntegration:
 
     def test_clear_crop_unchecks_all_preset_buttons(self, app_window) -> None:
         sb = app_window.sidebar
-        preset_1_1 = [b for b in sb.preset_btns if b.text() == "1:1"][0]
+        preset_1_1 = next(b for b in sb.preset_btns if b.text() == "1:1")
         preset_1_1.click()
         assert preset_1_1.isChecked()
 

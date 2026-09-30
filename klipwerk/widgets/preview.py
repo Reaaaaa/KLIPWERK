@@ -77,6 +77,8 @@ class PreviewWidget(QLabel):
         self._drag_mode = None
         self._drag_start = None
         self._orig_crop = None
+        self._active_cursor_shape = None
+        self.unsetCursor()
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
         self.clear()
         self.setText("Drop a video here\nor click  Open File")
@@ -251,16 +253,26 @@ class PreviewWidget(QLabel):
 
         return None
 
+    def closeEvent(self, event) -> None:
+        self.unsetCursor()
+        self._active_cursor_shape = None
+        super().closeEvent(event)
+
     def _update_cursor(self, pt: QPoint | None = None) -> None:
+        shape = Qt.CursorShape.ArrowCursor
         if pt is not None and self.crop_rect and self.crop_rect.width() > 4:
             hit = self._hit_test_crop(pt)
             if hit is not None:
-                self.setCursor(QCursor(hit[1]))
-                return
-        if self.crop_mode:
-            self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
-        else:
-            self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+                shape = hit[1]
+        elif self.crop_mode:
+            shape = Qt.CursorShape.CrossCursor
+
+        if getattr(self, "_active_cursor_shape", None) != shape:
+            self._active_cursor_shape = shape
+            if shape == Qt.CursorShape.ArrowCursor:
+                self.unsetCursor()
+            else:
+                self.setCursor(QCursor(shape))
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
