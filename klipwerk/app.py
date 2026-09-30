@@ -1184,7 +1184,20 @@ class Klipwerk(QMainWindow):
     def _on_crop_drawn(self, cr: dict) -> None:
         self.crop_rect = cr  # type: ignore[assignment]
         self.btn_crop.setChecked(False)
-        self._update_crop_ui()
+        sb = self.sidebar
+        for sp, val in (
+            (sb.crop_x, cr["x"]), (sb.crop_y, cr["y"]),
+            (sb.crop_w, cr["w"]), (sb.crop_h, cr["h"]),
+        ):
+            sp.blockSignals(True); sp.setValue(val); sp.blockSignals(False)
+        self._update_crop_info()
+        sb.btn_ex_crop.setEnabled(True)
+        self.btn_crop_clr.setEnabled(True)
+        if getattr(self.preview, "_aspect_ratio", None) is None and hasattr(sb, "preset_btns"):
+            for b in sb.preset_btns:
+                b.blockSignals(True)
+                b.setChecked(False)
+                b.blockSignals(False)
 
     def _on_crop_fields_changed(self) -> None:
         sb = self.sidebar
@@ -1230,10 +1243,16 @@ class Klipwerk(QMainWindow):
         self._update_crop_info()
         sb.btn_ex_crop.setEnabled(False)
         self.btn_crop_clr.setEnabled(False)
+        if hasattr(sb, "preset_btns"):
+            for b in sb.preset_btns:
+                b.blockSignals(True)
+                b.setChecked(False)
+                b.blockSignals(False)
 
     def _set_crop_preset(self, wr: int, hr: int) -> None:
         if not self.vid_w:
             return
+        self.preview.set_aspect_ratio((wr, hr))
         if self.vid_w / self.vid_h > wr / hr:
             h = self.vid_h; w = int(h * wr / hr)
         else:

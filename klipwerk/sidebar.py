@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .core.formats import FORMATS
-from .ui.theme import ACC3, BORDER, BORDER2, MUTED, MUTED2, S1, S2, S3, TEXT
+from .ui.theme import ACC, ACC3, BORDER, BORDER2, FONT_BUMP, MUTED, MUTED2, S1, S2, S3, TEXT
 from .widgets.guarded import (
     GuardedComboBox,
     GuardedDoubleSpinBox,
@@ -62,6 +62,7 @@ class SidebarRefs:
     lbl_h: QLabel
     btn_ex_crop: QPushButton
     fname_preview_crop: QLabel
+    preset_btns: list[QPushButton]
 
     # Mark In/Out
     mark_in_spin: GuardedDoubleSpinBox
@@ -198,13 +199,40 @@ def build_sidebar(
     # Aspect ratio presets
     presets_w = QWidget()
     presets_outer = QHBoxLayout(presets_w)
-    presets_outer.setContentsMargins(10, 0, 0, 0)
-    presets_outer.setSpacing(5)
+    presets_outer.setContentsMargins(10, 2, 10, 6)
+    presets_outer.setSpacing(6)
+    preset_btn_style = (
+        f"QPushButton {{ background:{S3}; border:1.5px solid {BORDER2};"
+        f" color:{TEXT}; font-size:{11 + FONT_BUMP}px; border-radius:4px;"
+        f" padding:3px 6px; min-height:0px; outline:none; }}"
+        f"QPushButton:hover {{ border-color:{ACC}; color:{ACC}; background:{S3}; }}"
+        f"QPushButton:checked {{ background:{S2}; border-color:{ACC}; color:{ACC}; font-weight:bold; }}"
+        f"QPushButton:disabled {{ color:{MUTED}; border-color:{BORDER}; background:{S2}; }}"
+    )
+    preset_btns: list[QPushButton] = []
     for name, wr, hr in [("16:9", 16, 9), ("9:16", 9, 16), ("1:1", 1, 1), ("4:3", 4, 3)]:
-        b = btn(name)
+        b = QPushButton(name)
+        b.setCheckable(True)
         b.setFixedHeight(28)
-        b.clicked.connect(lambda _checked=False, w_=wr, h_=hr: set_crop_preset(w_, h_))
+        b.setStyleSheet(preset_btn_style)
+        b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        def _make_handler(w_=wr, h_=hr, btn_=b):
+            def handler(_checked=False):
+                for other in preset_btns:
+                    if other is not btn_:
+                        other.blockSignals(True)
+                        other.setChecked(False)
+                        other.blockSignals(False)
+                btn_.blockSignals(True)
+                btn_.setChecked(True)
+                btn_.blockSignals(False)
+                set_crop_preset(w_, h_)
+            return handler
+
+        b.clicked.connect(_make_handler(wr, hr, b))
         presets_outer.addWidget(b)
+        preset_btns.append(b)
     crop_lay.addWidget(presets_w)
 
     from .ui.icons import SVG_DOWNLOAD, make_icon
@@ -420,6 +448,7 @@ def build_sidebar(
         crop_info=crop_info,
         btn_ex_crop=btn_ex_crop,
         fname_preview_crop=fname_preview_crop,
+        preset_btns=preset_btns,
         mark_in_spin=mark_in_spin, mark_out_spin=mark_out_spin,
         lbl_in=lbl_in, lbl_out=lbl_out,
         btn_add_sidebar=btn_add_sidebar,

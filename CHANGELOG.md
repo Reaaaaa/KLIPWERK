@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 ## [0.5.0]
 
 ### Added
+- **Interactive Move & Aspect-Ratio-Preserving Scaling for Crop Presets**:
+  - Selecting an aspect ratio preset (`16:9`, `9:16`, `1:1`, `4:3`) now creates a fully movable and resizable crop box on the video preview.
+  - Dragging inside the crop box repositions it anywhere within video boundaries with boundary clamping.
+  - Dragging any of the 8 resize handles scales the crop box while strictly locking and preserving the aspect ratio.
+  - Added visual corner and midpoint resize handles and context-aware cursor feedback (`SizeAllCursor`, `SizeFDiagCursor`, `SizeBDiagCursor`, `SizeHorCursor`, `SizeVerCursor`).
+  - Synced video pixel coordinates live with sidebar spinboxes and export buttons.
+- **Unified Single Thick Timeline Bar & Embedded Waveform**:
+  - Replaced the confusing two-tier timeline layout with a single, modern 14 px timeline capsule bar.
+  - Audio waveforms are now rendered directly on/inside the timeline bar, preventing peaks from reaching into the video preview.
+  - Eliminated zero-amplitude horizontal line artifacts during audio silence.
+  - Added subtle luminous played progress tint behind the waveform peaks and refined playhead handle.
+- **Aspect Ratio Preset Buttons Styling**:
+  - Fixed cut-off/obscured lower border on aspect ratio preset buttons (`16:9`, `9:16`, `1:1`, `4:3`) by adjusting box sizing, padding, and layout margins.
+  - Added active checked state highlighting the selected aspect ratio preset with exclusive toggle behavior, auto-cleared on "Clear Crop".
 - **"Clear In/Out" toolbar button & shortcut**:
   - Added a dedicated `✕ Clear In/Out` danger button in the top toolbar next to `[ In` and `Out ]` to reset accidentally set cut points.
   - Added `Alt`+`X` keyboard shortcut to quickly clear In and Out markers.
@@ -16,6 +30,7 @@ All notable changes to this project will be documented in this file.
   - Collision clamping: In marker cannot be dragged past Out; Out marker cannot be dragged before In.
   - Live video preview: scrubbing/dragging an In or Out marker seeks video frames in real-time, syncing sidebar spinboxes and timecode displays immediately.
 - **Unit test suites**:
+  - `tests/test_crop_interaction.py`: 7 tests covering crop hit-testing, dragging/moving, aspect-ratio locked scaling, boundary clamping, and preset button synchronization.
   - `tests/test_markers_and_scrubber.py`: 11 tests covering marker hit-testing, drag & drop, clamping, hover cursor changes, and state resets.
   - `tests/test_window_scaling.py`: 12 tests covering 8-way resize hit testing, window state maximize/restore icon synchronization, and hover persistence.
 

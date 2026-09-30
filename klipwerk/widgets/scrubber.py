@@ -28,7 +28,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
-from ..ui.theme import ACC, ACC2, ACC3, BORDER2, S2, S3, TEXT
+from ..ui.theme import ACC, ACC2, ACC3, BORDER2, S2, TEXT
 
 
 class ScrubberWidget(QWidget):
@@ -41,8 +41,8 @@ class ScrubberWidget(QWidget):
 
     # Layout constants
     _MARGIN = 8        # horizontal padding inside the widget
-    _TRACK_H = 4       # height of the seekbar track
-    _HANDLE_R = 6      # playhead circle radius
+    _TRACK_H = 14      # height of the seekbar track
+    _HANDLE_R = 7      # playhead circle radius
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -130,52 +130,61 @@ class ScrubberWidget(QWidget):
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            w, h = self.width(), self.height()
+            w = self.width()
             m = self._MARGIN
             track_px = max(1, w - m * 2)
-            track_y = h - 12
+            track_y = 26
             track_h = self._TRACK_H
 
-            self._paint_waveform(painter, m, track_px, track_y)
+            # 1. Base track capsule
             self._paint_track_bg(painter, m, track_px, track_y, track_h)
 
             if not self.isEnabled():
                 return
 
+            # 2. In/Out selection highlight on the track
             self._paint_in_out_zone(painter, m, track_px, track_y, track_h)
+
+            # 3. Waveform rendered directly on/inside the track bar
+            self._paint_waveform(painter, m, track_px, track_y, track_h)
+
+            # 4. Played progress glow
             self._paint_played(painter, m, track_px, track_y, track_h)
+
+            # 5. Marker badges & needles pointing down to the track
             self._paint_markers(painter, m, track_px, track_y, track_h)
+
+            # 6. Playhead handle
             self._paint_playhead(painter, m, track_px, track_y, track_h)
 
+            # 7. Hover guide line
             if self._hover_x >= 0 and self._dragging_marker is None:
                 painter.setPen(QPen(QColor(TEXT + "66"), 1, Qt.PenStyle.DashLine))
-                painter.drawLine(self._hover_x, 0, self._hover_x, h)
+                painter.drawLine(self._hover_x, track_y - 4, self._hover_x, track_y + track_h + 4)
         finally:
             painter.end()
 
-    def _paint_waveform(self, painter: QPainter, m: int, track_px: int, ty: int) -> None:
+    def _paint_waveform(self, painter: QPainter, m: int, track_px: int, ty: int, th: int) -> None:
         wf = self._waveform
         if wf is None or not self.isEnabled():
-            # Fallback: flat placeholder
-            painter.fillRect(m, 4, track_px, ty - 8, QColor(S3))
             return
 
         n = len(wf)
         if n == 0:
-            painter.fillRect(m, 4, track_px, ty - 8, QColor(S3))
             return
 
-        wf_h = max(2, ty - 4)
-        mid = ty // 2
+        wf_h = max(2, th - 4)
+        mid = ty + th // 2
         played_color = QColor(ACC)
-        played_color.setAlpha(170)
-        unplayed_color = QColor(BORDER2)
+        unplayed_color = QColor(BORDER2).lighter(140)
 
         painter.setPen(Qt.PenStyle.NoPen)
         for i in range(track_px):
             idx = int(i / track_px * n)
             peak = float(wf[min(idx, n - 1)])
-            bar = max(1, int(peak * wf_h * 0.45))
+            if peak <= 0.02:
+                continue
+            bar = max(1, int(peak * wf_h * 0.5))
             xi = m + i
             if i / track_px <= self._pos:
                 painter.setBrush(QBrush(played_color))
@@ -186,8 +195,8 @@ class ScrubberWidget(QWidget):
     def _paint_track_bg(self, painter: QPainter, m: int, track_px: int,
                         ty: int, th: int) -> None:
         painter.setBrush(QBrush(QColor(S2)))
-        painter.setPen(QPen(QColor(BORDER2), 1))
-        painter.drawRoundedRect(m, ty, track_px, th, 2, 2)
+        painter.setPen(QPen(QColor(BORDER2), 1.5))
+        painter.drawRoundedRect(m, ty, track_px, th, 4, 4)
 
     def _paint_in_out_zone(self, painter: QPainter, m: int, track_px: int,
                            ty: int, th: int) -> None:
@@ -196,15 +205,15 @@ class ScrubberWidget(QWidget):
         ix = m + int(self._in * track_px)
         ox = m + int(self._out * track_px)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(200, 245, 58, 50)))
+        painter.setBrush(QBrush(QColor(200, 245, 58, 45)))
         painter.drawRect(ix, ty, ox - ix, th)
 
     def _paint_played(self, painter: QPainter, m: int, track_px: int,
                       ty: int, th: int) -> None:
         px = m + int(self._pos * track_px)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(ACC)))
-        painter.drawRoundedRect(m, ty, max(0, px - m), th, 2, 2)
+        painter.setBrush(QBrush(QColor(200, 245, 58, 40)))
+        painter.drawRoundedRect(m, ty, max(0, px - m), th, 4, 4)
 
     def _paint_markers(self, painter: QPainter, m: int, track_px: int,
                        ty: int, th: int) -> None:
@@ -221,7 +230,7 @@ class ScrubberWidget(QWidget):
 
             # Needle extending through the track
             painter.setPen(QPen(color, 2))
-            painter.drawLine(ix, ty, ix, ty + th + 3)
+            painter.drawLine(ix, ty, ix, ty + th + 2)
 
             # Badge polygon: pentagon pointing down
             poly = QPolygon([
@@ -250,7 +259,7 @@ class ScrubberWidget(QWidget):
 
             # Needle extending through the track
             painter.setPen(QPen(color, 2))
-            painter.drawLine(ox, ty, ox, ty + th + 3)
+            painter.drawLine(ox, ty, ox, ty + th + 2)
 
             # Badge polygon: pentagon pointing down
             poly = QPolygon([
@@ -274,9 +283,10 @@ class ScrubberWidget(QWidget):
     def _paint_playhead(self, painter: QPainter, m: int, track_px: int,
                         ty: int, th: int) -> None:
         px = m + int(self._pos * track_px)
+        mid = ty + th // 2
         painter.setBrush(QBrush(QColor(ACC)))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(QPoint(px, ty + th // 2), self._HANDLE_R, self._HANDLE_R)
+        painter.setPen(QPen(QColor("#000000"), 1.2))
+        painter.drawEllipse(QPoint(px, mid), self._HANDLE_R, self._HANDLE_R)
 
     # ── Input ──────────────────────────────────────────────────────
     def _pct(self, x: float) -> float:
@@ -288,10 +298,10 @@ class ScrubberWidget(QWidget):
             return None
         m = self._MARGIN
         track_px = max(1, self.width() - m * 2)
-        ty = self.height() - 12
+        ty = 26
         th = self._TRACK_H
 
-        if not (ty - 22 <= y <= ty + th + 6):
+        if not (6 <= y <= ty + th + 6):
             return None
 
         candidates: list[tuple[str, int]] = []
