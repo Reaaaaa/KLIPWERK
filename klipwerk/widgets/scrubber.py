@@ -41,12 +41,12 @@ class ScrubberWidget(QWidget):
 
     # Layout constants
     _MARGIN = 8        # horizontal padding inside the widget
-    _TRACK_H = 14      # height of the seekbar track
+    _TRACK_H = 30      # height of the seekbar track
     _HANDLE_R = 7      # playhead circle radius
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(48)
+        self.setFixedHeight(58)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.setMouseTracking(True)
@@ -133,7 +133,7 @@ class ScrubberWidget(QWidget):
             w = self.width()
             m = self._MARGIN
             track_px = max(1, w - m * 2)
-            track_y = 26
+            track_y = 20
             track_h = self._TRACK_H
 
             # 1. Base track capsule
@@ -160,7 +160,7 @@ class ScrubberWidget(QWidget):
             # 7. Hover guide line
             if self._hover_x >= 0 and self._dragging_marker is None:
                 painter.setPen(QPen(QColor(TEXT + "66"), 1, Qt.PenStyle.DashLine))
-                painter.drawLine(self._hover_x, track_y - 4, self._hover_x, track_y + track_h + 4)
+                painter.drawLine(self._hover_x, track_y, self._hover_x, track_y + track_h)
         finally:
             painter.end()
 
@@ -176,7 +176,7 @@ class ScrubberWidget(QWidget):
         wf_h = max(2, th - 4)
         mid = ty + th // 2
         played_color = QColor(ACC)
-        unplayed_color = QColor(BORDER2).lighter(140)
+        unplayed_color = QColor(BORDER2).lighter(145)
 
         painter.setPen(Qt.PenStyle.NoPen)
         for i in range(track_px):
@@ -184,7 +184,7 @@ class ScrubberWidget(QWidget):
             peak = float(wf[min(idx, n - 1)])
             if peak <= 0.02:
                 continue
-            bar = max(1, int(peak * wf_h * 0.5))
+            bar = max(1, int(peak * wf_h * 0.48))
             xi = m + i
             if i / track_px <= self._pos:
                 painter.setBrush(QBrush(played_color))
@@ -205,14 +205,14 @@ class ScrubberWidget(QWidget):
         ix = m + int(self._in * track_px)
         ox = m + int(self._out * track_px)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(200, 245, 58, 45)))
-        painter.drawRect(ix, ty, ox - ix, th)
+        painter.setBrush(QBrush(QColor(200, 245, 58, 40)))
+        painter.drawRoundedRect(ix, ty, ox - ix, th, 2, 2)
 
     def _paint_played(self, painter: QPainter, m: int, track_px: int,
                       ty: int, th: int) -> None:
         px = m + int(self._pos * track_px)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(200, 245, 58, 40)))
+        painter.setBrush(QBrush(QColor(200, 245, 58, 30)))
         painter.drawRoundedRect(m, ty, max(0, px - m), th, 4, 4)
 
     def _paint_markers(self, painter: QPainter, m: int, track_px: int,
@@ -230,15 +230,15 @@ class ScrubberWidget(QWidget):
 
             # Needle extending through the track
             painter.setPen(QPen(color, 2))
-            painter.drawLine(ix, ty, ix, ty + th + 2)
+            painter.drawLine(ix, ty, ix, ty + th)
 
             # Badge polygon: pentagon pointing down
             poly = QPolygon([
-                QPoint(ix - 8, ty - 19),
-                QPoint(ix + 8, ty - 19),
-                QPoint(ix + 8, ty - 6),
-                QPoint(ix, ty - 1),
-                QPoint(ix - 8, ty - 6),
+                QPoint(ix - 8, ty - 18),
+                QPoint(ix + 8, ty - 18),
+                QPoint(ix + 8, ty - 5),
+                QPoint(ix, ty),
+                QPoint(ix - 8, ty - 5),
             ])
             painter.setBrush(QBrush(color))
             if is_active:
@@ -249,7 +249,7 @@ class ScrubberWidget(QWidget):
 
             # Draw "I" letter
             painter.setPen(QPen(QColor("#0b0f19")))
-            painter.drawText(QRect(ix - 8, ty - 19, 16, 13), Qt.AlignmentFlag.AlignCenter, "I")
+            painter.drawText(QRect(ix - 8, ty - 18, 16, 13), Qt.AlignmentFlag.AlignCenter, "I")
 
         # Draw Out marker
         if self._has_out:
@@ -259,15 +259,15 @@ class ScrubberWidget(QWidget):
 
             # Needle extending through the track
             painter.setPen(QPen(color, 2))
-            painter.drawLine(ox, ty, ox, ty + th + 2)
+            painter.drawLine(ox, ty, ox, ty + th)
 
             # Badge polygon: pentagon pointing down
             poly = QPolygon([
-                QPoint(ox - 8, ty - 19),
-                QPoint(ox + 8, ty - 19),
-                QPoint(ox + 8, ty - 6),
-                QPoint(ox, ty - 1),
-                QPoint(ox - 8, ty - 6),
+                QPoint(ox - 8, ty - 18),
+                QPoint(ox + 8, ty - 18),
+                QPoint(ox + 8, ty - 5),
+                QPoint(ox, ty),
+                QPoint(ox - 8, ty - 5),
             ])
             painter.setBrush(QBrush(color))
             if is_active:
@@ -278,12 +278,16 @@ class ScrubberWidget(QWidget):
 
             # Draw "O" letter
             painter.setPen(QPen(QColor("#0b0f19")))
-            painter.drawText(QRect(ox - 8, ty - 19, 16, 13), Qt.AlignmentFlag.AlignCenter, "O")
+            painter.drawText(QRect(ox - 8, ty - 18, 16, 13), Qt.AlignmentFlag.AlignCenter, "O")
 
     def _paint_playhead(self, painter: QPainter, m: int, track_px: int,
                         ty: int, th: int) -> None:
         px = m + int(self._pos * track_px)
         mid = ty + th // 2
+        # Vertical needle line through the track
+        painter.setPen(QPen(QColor(ACC), 2))
+        painter.drawLine(px, ty, px, ty + th)
+        # Playhead handle circle
         painter.setBrush(QBrush(QColor(ACC)))
         painter.setPen(QPen(QColor("#000000"), 1.2))
         painter.drawEllipse(QPoint(px, mid), self._HANDLE_R, self._HANDLE_R)
@@ -298,7 +302,7 @@ class ScrubberWidget(QWidget):
             return None
         m = self._MARGIN
         track_px = max(1, self.width() - m * 2)
-        ty = 26
+        ty = 20
         th = self._TRACK_H
 
         if not (6 <= y <= ty + th + 6):

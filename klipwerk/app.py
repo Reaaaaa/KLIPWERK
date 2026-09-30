@@ -442,7 +442,7 @@ class Klipwerk(QMainWindow):
 
     def _build_playback(self) -> QWidget:
         w = QWidget()
-        w.setFixedHeight(128)
+        w.setFixedHeight(140)
         w.setStyleSheet(f"background:{S1}; border-top:1px solid {BORDER2};")
         lay = QVBoxLayout(w)
         lay.setContentsMargins(14, 8, 14, 10)
