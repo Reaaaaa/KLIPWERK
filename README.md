@@ -8,7 +8,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![PyQt6](https://img.shields.io/badge/UI-PyQt6-41cd52?logo=qt&logoColor=white)](https://pypi.org/project/PyQt6/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-125%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-148%20passing-brightgreen)](tests/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/Reaaaaa/klipwerk)
 
 <br/>
@@ -39,7 +39,7 @@ Under the hood, KLIPWERK is a thin wrapper around `ffmpeg`. It works with standa
 | | |
 |---|---|
 | **Live preview** | OpenCV-powered frame display with drag-to-crop, rule-of-thirds overlay, and aspect-ratio presets |
-| **Waveform scrubber** | Timeline with waveform visualization (numpy-vectorized peak extraction), hover thumbnails, and I/O markers |
+| **Waveform scrubber** | Timeline with waveform visualization (numpy-vectorized peak extraction), hover thumbnails, and draggable I/O markers with live scrubbing |
 | **Clip list** | Drag-to-reorder, rename, undo/redo (command-pattern, no full list copies per edit) |
 | **Sequence export** | Concatenate any number of clips into one video in a single click |
 | **Stream-copy fast path** | No crop + all positive durations → skips re-encoding entirely, making exports significantly faster |
@@ -47,7 +47,7 @@ Under the hood, KLIPWERK is a thin wrapper around `ffmpeg`. It works with standa
 | **Animated GIF export** | One click from any clip or the full sequence — two-branch palette filter (palettegen + paletteuse) for best-in-class 256-colour quality. FPS: 8/12/15/24. Width: 320/480/640/original. Tiered 15 s / 30 s duration safety. |
 | **Rich media info** | ffprobe panel: codec, container, bitrate, color space, pixel format, duration |
 | **Settings persistence** | Window geometry, export defaults, format/CRF/preset survive restarts via `QSettings` |
-| **Frameless chrome** | Custom title bar with proper resize handles on all edges |
+| **Frameless chrome** | Custom title bar with 8-direction resize handles on all edges and corners |
 | **Zero config** | Drop `ffmpeg`/`ffprobe` next to the script or put them on `$PATH` — done |
 
 > [!NOTE]
@@ -87,6 +87,7 @@ KLIPWERK calls your existing `ffmpeg` installation — nothing is bundled. It se
 | `O` | Set **Out** marker at current frame |
 | `Shift`+`I` | Jump to **In** marker |
 | `Shift`+`O` | Jump to **Out** marker |
+| `Alt`+`X` | Clear **In** and **Out** markers |
 | `C` | Add clip from In → Out |
 | `←` / `→` | Step one frame |
 | `Shift` + `←` / `→` | Step ten frames |
@@ -121,7 +122,7 @@ klipwerk --reset-settings
 ```bash
 pip install -e ".[dev]"
 
-pytest                       # run all 125 tests
+pytest                       # run all 148 tests
 pytest -v                    # verbose output
 ruff check klipwerk          # lint
 mypy klipwerk                # type-check
